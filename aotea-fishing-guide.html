@@ -1,556 +1,85 @@
-<!doctype html>
-<html lang="en-NZ">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Aotea fishing guide — tides, bite times &amp; maramataka for Great Barrier Island</title>
-<meta name="description" content="Daily fishing guide for Aotea Great Barrier Island: tide times for your spot, solunar bite times, maramataka (Māori fishing calendar), sunrise and sunset.">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Newsreader:opsz,wght@6..72,400;6..72,500&display=swap" rel="stylesheet">
-<style>
-  :root{
-    --sea:#12343B;      /* deep harbour water */
-    --sea-2:#1D4B52;
-    --kelp:#2F6B5C;
-    --sand:#EFE9DA;     /* Medlands sand */
-    --sand-2:#E2DAC6;
-    --ink:#182022;
-    --ink-2:#4B5657;
-    --kina:#D4712B;     /* kina orange — bite windows */
-    --kina-soft:rgba(212,113,43,.28);
-    --moon:#F4E9C8;
-    --night:#0B1F24;
-    --dusk:#26505A;
-    --day:#BFD9D6;
-    --excellent:#1C7C4A; --good:#2F6B5C; --ok:#8A8A3E; --fair:#8A8A3E; --poor:#9B4A3A;
-    --radius:10px;
-    --display:"Fraunces","Iowan Old Style",Palatino,Georgia,serif;
-    --body:"Newsreader","Iowan Old Style",Palatino,Georgia,serif;
-    --ui:"Newsreader",Palatino,Georgia,serif;
-  }
-  *{box-sizing:border-box}
-  html,body{margin:0;background:var(--sand);color:var(--ink);
-    font:16px/1.55 var(--body);
-    -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
-  button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
-  button:focus-visible,a:focus-visible{outline:3px solid var(--kina);outline-offset:2px}
-  .wrap{max-width:640px;margin:0 auto;padding:0 18px 56px}
+/**
+ * Aotea tides proxy — Cloudflare Worker
+ *
+ * Sits between the fishing-guide page and the NIWA Tide API so the API key
+ * never ships to the browser. Only answers for coordinates on/around Aotea
+ * Great Barrier Island, and caches each rounded coordinate + start date for
+ * 12 hours, so many visitors cost about one NIWA call per spot per day.
+ *
+ * Setup:
+ *   1. Create an API key at https://developer.niwa.co.nz with Tide API access.
+ *   2. Cloudflare dashboard → Workers → create → paste this file.
+ *   3. Settings → Variables → add secret  NIWA_API_KEY = <your key>
+ *      Optionally add ALLOWED_ORIGIN = https://your-site.example  (default: *)
+ *   4. Deploy, copy the workers.dev URL into TIDE_API in the HTML page.
+ *
+ * Request:  GET /?lat=-36.32&long=175.48&start=2026-09-06&days=12
+ * Response: NIWA's JSON passed through ({ metadata, values:[{time,value}] })
+ */
 
-  /* spot picker */
-  .spot{margin-top:14px;display:flex;gap:8px;align-items:center}
-  .spot select{flex:1;appearance:none;-webkit-appearance:none;padding:10px 38px 10px 14px;border-radius:999px;border:1.5px solid var(--sea);background:var(--sand) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 14 14'%3E%3Cpath d='M2 5l5 5 5-5' fill='none' stroke='%2312343B' stroke-width='1.8'/%3E%3C/svg%3E") no-repeat right 14px center;font:inherit;font-size:1.02rem;font-weight:600;color:var(--ink)}
-  .spot button{width:42px;height:42px;border-radius:50%;background:var(--sand-2);font-size:1.1rem;flex:none}
-  .coast{color:var(--ink-2);font-size:.85rem;margin:6px 0 0}
-  .loading{color:var(--ink-2);font-size:.95rem;padding:10px 0}
-  /* header */
-  header{padding:22px 0 8px}
-  h1{margin:0;font-family:var(--display);font-weight:600;font-size:1.7rem;font-optical-sizing:auto;letter-spacing:-.015em;line-height:1.12}
-  .place{margin:2px 0 0;color:var(--ink-2);font-size:.95rem}
-  .datenav{display:flex;align-items:center;gap:6px;margin-top:16px}
-  .datenav button{padding:8px 12px;border-radius:999px;background:var(--sand-2);font-size:.95rem}
-  .datenav button.today{background:var(--sea);color:var(--sand)}
-  .datenav .cur{flex:1;text-align:center;font-size:1.05rem;font-weight:600}
-  .datenav input[type=date]{position:absolute;opacity:0;width:1px;height:1px}
-
-  /* hero timeline */
-  .hero{margin-top:14px;background:var(--sea);border-radius:14px;padding:14px 12px 10px;color:var(--sand);
-    box-shadow:0 10px 30px -18px rgba(18,52,59,.7)}
-  .hero .verdict{display:flex;align-items:baseline;justify-content:space-between;gap:12px;padding:0 4px 10px}
-  .hero .verdict b{font-family:var(--display);font-size:1.32rem;font-weight:600;font-optical-sizing:auto;letter-spacing:-.01em}
-  .hero .verdict span{color:var(--day);font-size:.92rem}
-  .hero svg{display:block;width:100%;height:auto}
-  .legend{display:flex;flex-wrap:wrap;gap:6px 14px;padding:10px 4px 0;font-size:.82rem;color:var(--day)}
-  .legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;vertical-align:-1px}
-
-  /* sections */
-  section{margin-top:26px}
-  h2{margin:0 0 8px;font-family:var(--display);font-size:1.18rem;font-weight:600;font-optical-sizing:auto;letter-spacing:-.01em;display:flex;align-items:baseline;gap:10px}
-  h2 small{font-weight:400;color:var(--ink-2);font-size:.88rem}
-  .rows{border-top:1px solid var(--sand-2)}
-  .row{display:grid;grid-template-columns:5.2em 1fr auto;gap:10px;padding:9px 0;border-bottom:1px solid var(--sand-2);align-items:baseline}
-  .row .t{font-variant-numeric:tabular-nums;font-weight:600}
-  .row .k{color:var(--ink-2)}
-  .row .v{text-align:right;color:var(--ink-2);font-variant-numeric:tabular-nums}
-  .row.major .k{color:var(--ink);font-weight:600}
-  .pill{display:inline-block;padding:2px 9px;border-radius:999px;font-size:.8rem;color:#fff;vertical-align:1px}
-  .pill.good{background:var(--good)} .pill.ok{background:var(--ok)} .pill.poor{background:var(--poor)}
-
-  .mara{display:grid;grid-template-columns:auto 1fr;gap:14px;align-items:start;background:var(--sand-2);border-radius:var(--radius);padding:14px}
-  .mara .moon{width:58px;height:58px}
-  .mara .name{font-family:var(--display);font-size:1.3rem;font-weight:600;font-optical-sizing:auto;letter-spacing:-.01em;line-height:1.2}
-  .mara .sub{color:var(--ink-2);font-size:.92rem;margin-top:2px}
-  .mara p{margin:8px 0 0;font-size:.95rem}
-
-  /* week strip */
-  .week{display:grid;grid-template-columns:repeat(7,1fr);gap:5px}
-  .week button{padding:8px 2px 6px;border-radius:8px;background:var(--sand-2);text-align:center;line-height:1.2}
-  .week button.sel{background:var(--sea);color:var(--sand)}
-  .week .d{font-size:.78rem;color:inherit;opacity:.75}
-  .week .n{font-size:1.05rem;font-weight:600;display:block}
-  .week .dot{display:block;width:8px;height:8px;border-radius:50%;margin:5px auto 0}
-  .week .dot.excellent{background:var(--excellent)} .week .dot.good{background:var(--good)} .week .dot.ok{background:var(--ok)} .week .dot.fair{background:var(--fair)} .week .dot.poor{background:var(--poor)}
-  .week button.sel .dot{outline:2px solid var(--sand)}
-
-  /* tide data state */
-  .notice{background:var(--sand-2);border-left:4px solid var(--kina);border-radius:6px;padding:12px 14px;font-size:.95rem}
-  .notice p{margin:0 0 8px}.notice p:last-child{margin:0}
-  .notice label{display:inline-block;padding:7px 12px;border-radius:999px;background:var(--sea);color:var(--sand);cursor:pointer;font-size:.9rem}
-  .notice input[type=file]{display:none}
-  details{margin-top:10px;font-size:.9rem;color:var(--ink-2)}
-  summary{cursor:pointer;color:var(--ink)}
-  .fields{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:8px}
-  .fields label{display:block;background:none;color:var(--ink-2);padding:0;font-size:.85rem}
-  .fields input[type=number]{width:100%;padding:6px 8px;border:1px solid #cfc7b2;border-radius:6px;font:inherit;background:#fff}
-  .small{color:var(--ink-2);font-size:.85rem}
-  .actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
-  .actions button{padding:6px 12px;border-radius:999px;background:var(--sand-2);font-size:.88rem}
-
-  footer{margin-top:40px;font-size:.84rem;color:var(--ink-2);line-height:1.55}
-  footer p{margin:0 0 8px}
-  @media (prefers-reduced-motion:no-preference){ .week button, .datenav button{transition:background .15s} }
-</style>
-</head>
-<body>
-<div class="wrap">
-  <header>
-    <h1>Aotea fishing guide</h1>
-    <p class="place">Great Barrier Island · tides, bite times, maramataka, sun &amp; moon</p>
-    <div class="spot"><select id="spotSel" aria-label="Choose a spot"></select><button id="geo" aria-label="Use my location" title="Use my location">◎</button></div>
-    <p class="coast" id="coast"></p>
-    <div class="datenav">
-      <button id="prev" aria-label="Previous day">‹</button>
-      <button class="today" id="todayBtn">Today</button>
-      <span class="cur" id="curDate"></span>
-      <button id="pick" aria-label="Choose a date">📅</button>
-      <input type="date" id="dateInput" aria-hidden="true">
-      <button id="next" aria-label="Next day">›</button>
-    </div>
-  </header>
-
-  <div class="hero" id="hero"></div>
-
-  <section>
-    <h2>Week ahead <small>tap a day</small></h2>
-    <div class="week" id="week"></div>
-  </section>
-
-  <section>
-    <h2>Tides <small id="tideSrc"></small></h2>
-    <div id="tides"></div>
-  </section>
-
-  <section>
-    <h2>Bite times <small>solunar</small></h2>
-    <div class="rows" id="bites"></div>
-    <p class="small" style="margin:8px 0 0">Major periods run for two hours around the moon passing overhead and underfoot; minor periods for one hour around moonrise and moonset. The half hour either side of every high and low tide is cut out — the bite tends to switch off through the turn — so a window is trimmed or split around it, and one falling entirely on the turn is marked slack. A window that lands on dawn or dusk is the one to plan around.</p>
-  </section>
-
-  <section>
-    <h2>Maramataka <small>Māori fishing calendar</small></h2>
-    <div class="mara" id="mara"></div>
-  </section>
-
-  <section>
-    <h2>Sun &amp; moon</h2>
-    <div class="rows" id="sunmoon"></div>
-  </section>
-
-  <footer>
-    <p>Times are New Zealand local time (NZST/NZDT). Sun, moon, solunar and maramataka are computed on your device for the spot you choose. Tide predictions come from the NIWA Tide API (heights above chart datum) and are not official tide tables; allow for weather, barometric pressure and local effects, especially on the exposed east coast.</p>
-    <p>The maramataka shown is a widely published thirty-night version. Iwi and hapū of Aotea and the wider Hauraki Gulf keep their own; where they differ, theirs is the one to follow.</p>
-  </footer>
-</div>
-
-<script>
-/* ============================================================
-   Tryphena fishing guide
-   Everything runs client-side except tides, which come via a small worker (worker.js).
-   ============================================================ */
-
-const TZ = 'Pacific/Auckland';
-
-/* ---------- Spots ----------
-   Coordinates are approximate harbour / beach centres; nudge them to the water
-   if a spot ever reports odd tides. NIWA uses the nearest modelled sea point.
-*/
-const SPOTS = [
-  {id:'tryphena',      name:'Tryphena',        coast:'West coast harbour · sheltered',        lat:-36.320, lon:175.485},
-  {id:'okupu',         name:'Okupu (Blind Bay)', coast:'West coast bay · sheltered',           lat:-36.283, lon:175.430},
-  {id:'whangaparapara',name:'Whangaparapara',  coast:'West coast harbour · sheltered',        lat:-36.250, lon:175.397},
-  {id:'fitzroy',       name:'Port Fitzroy',    coast:'West coast harbour · very sheltered',   lat:-36.170, lon:175.360},
-  {id:'abercrombie',   name:'Port Abercrombie',coast:'Northwest harbour · sheltered',         lat:-36.158, lon:175.338},
-  {id:'whangapoua',    name:'Whangapoua',      coast:'Northeast beach & estuary · exposed',   lat:-36.135, lon:175.428},
-  {id:'harataonga',    name:'Harataonga',      coast:'East coast bay · exposed',              lat:-36.190, lon:175.500},
-  {id:'awana',         name:'Awana',           coast:'East coast beach · exposed',            lat:-36.220, lon:175.505},
-  {id:'medlands',      name:'Medlands',        coast:'East coast beach · exposed',            lat:-36.285, lon:175.520},
-  {id:'kaitoke',       name:'Kaitoke (Claris)',coast:'East coast beach · exposed',            lat:-36.245, lon:175.495},
-  {id:'capebarrier',   name:'Cape Barrier',    coast:'Southern tip · exposed, strong tidal streams', lat:-36.355, lon:175.495},
-];
-const ISLAND = {latMin:-36.42, latMax:-36.03, lonMin:175.25, lonMax:175.62}; // used for "my location"
-
-/* ---------- Tide source ----------
-   TIDE_API is your Cloudflare Worker (see worker.js). It holds the NIWA key,
-   refuses coordinates outside the island, and caches each spot for 12 hours.
-   Leave it as-is for local testing; the page will show "tides unavailable".
-*/
 const TIDE_API = 'https://misty-heart-b3d1.benmason04-d24.workers.dev';
+const BOX = { latMin: -36.45, latMax: -36.0, lonMin: 175.2, lonMax: 175.7 };
+const CACHE_SECONDS = 12 * 3600;
 
-let spot = SPOTS[0], LAT = spot.lat, LON = spot.lon;
-let tides = [], tideStatus = 'idle'; // idle | loading | ok | error
-const tideCache = {}; // key -> events
+export default {
+  async fetch(request, env, ctx) {
+    const origin = env.ALLOWED_ORIGIN || '*';
+    const cors = {
+      'Access-Control-Allow-Origin': origin,
+      'Access-Control-Allow-Methods': 'GET, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type',
+    };
+    if (request.method === 'OPTIONS') return new Response(null, { headers: cors });
+    if (request.method !== 'GET') return json({ error: 'GET only' }, 405, cors);
 
-/* ---------- Time helpers (all math in UTC ms; display in NZ) ---------- */
-const fmtTime = new Intl.DateTimeFormat('en-NZ',{timeZone:TZ,hour:'2-digit',minute:'2-digit',hour12:false});
-const fmtDate = new Intl.DateTimeFormat('en-NZ',{timeZone:TZ,weekday:'short',day:'numeric',month:'short'});
-const fmtDow  = new Intl.DateTimeFormat('en-NZ',{timeZone:TZ,weekday:'short'});
-const fmtYMD  = new Intl.DateTimeFormat('en-CA',{timeZone:TZ,year:'numeric',month:'2-digit',day:'2-digit'});
-const hm = ms => fmtTime.format(new Date(ms));
-const ymd = ms => fmtYMD.format(new Date(ms));
+    const u = new URL(request.url);
+    const lat = Number(u.searchParams.get('lat'));
+    const long = Number(u.searchParams.get('long'));
+    const start = u.searchParams.get('start') || '';
+    const days = Math.min(Math.max(parseInt(u.searchParams.get('days') || '7', 10), 1), 31);
 
-function tzOffsetMin(ms){ // NZ offset at instant ms
-  const p = new Intl.DateTimeFormat('en-US',{timeZone:TZ,hourCycle:'h23',year:'numeric',month:'numeric',day:'numeric',hour:'numeric',minute:'numeric',second:'numeric'}).formatToParts(new Date(ms));
-  const g = t => +p.find(x=>x.type===t).value;
-  const asUTC = Date.UTC(g('year'),g('month')-1,g('day'),g('hour'),g('minute'),g('second'));
-  return Math.round((asUTC-ms)/60000);
-}
-function nzMidnight(y,m,d){ // UTC ms of local midnight on y-m-d
-  let guess = Date.UTC(y,m-1,d) - 12*3600e3;
-  guess = Date.UTC(y,m-1,d) - tzOffsetMin(guess)*60e3;
-  return Date.UTC(y,m-1,d) - tzOffsetMin(guess)*60e3;
-}
-function dayStart(ms){ const [y,m,d]=ymd(ms).split('-').map(Number); return nzMidnight(y,m,d); }
-function addDays(ms,n){ const [y,m,d]=ymd(ms).split('-').map(Number); return nzMidnight(y,m,d+n); }
+    if (!Number.isFinite(lat) || !Number.isFinite(long))
+      return json({ error: 'lat and long are required' }, 400, cors);
+    if (lat < BOX.latMin || lat > BOX.latMax || long < BOX.lonMin || long > BOX.lonMax)
+      return json({ error: 'This service only covers Aotea Great Barrier Island' }, 403, cors);
+    if (start && !/^\d{4}-\d{2}-\d{2}$/.test(start))
+      return json({ error: 'start must be YYYY-MM-DD' }, 400, cors);
+    if (!env.NIWA_API_KEY) return json({ error: 'Worker is missing NIWA_API_KEY' }, 500, cors);
 
-/* ---------- Astronomy (Meeus-style low-precision, good to ~1–2 min) ---------- */
-const rad=Math.PI/180, J2000=2451545, dayMs=864e5;
-const toJ = ms => ms/dayMs + 2440587.5;   // ms -> Julian day
+    // Round coordinates so nearby requests share a cache entry.
+    const rl = lat.toFixed(3), rg = long.toFixed(3);
+    const cacheKey = new Request(`https://aotea-tides.cache/${rl}/${rg}/${start || 'today'}/${days}`);
+    const cache = caches.default;
+    const hit = await cache.match(cacheKey);
+    if (hit) return withHeaders(hit, cors, 'HIT');
 
-const e = 23.4393*rad;
-function sunCoords(d){ // d = days since J2000
-  const M=rad*(357.5291+0.98560028*d), L=rad*(280.147+0.9856474*d)+rad*(1.9148*Math.sin(M)+0.02*Math.sin(2*M)+0.0003*Math.sin(3*M));
-  return {ra:Math.atan2(Math.sin(L)*Math.cos(e),Math.cos(L)), dec:Math.asin(Math.sin(e)*Math.sin(L)), lon:L};
-}
-function moonCoords(d){
-  const L=rad*(218.316+13.176396*d), M=rad*(134.963+13.064993*d), F=rad*(93.272+13.229350*d);
-  const l=L+rad*6.289*Math.sin(M), b=rad*5.128*Math.sin(F), dist=385001-20905*Math.cos(M);
-  return {ra:Math.atan2(Math.sin(l)*Math.cos(e)-Math.tan(b)*Math.sin(e),Math.cos(l)), dec:Math.asin(Math.sin(b)*Math.cos(e)+Math.cos(b)*Math.sin(e)*Math.sin(l)), dist, lon:l};
-}
-function sidereal(d){ return rad*(280.16+360.9856235*d) + LON*rad; }
-function altOf(ms, body){
-  const d = toJ(ms)-J2000, c = body==='sun'?sunCoords(d):moonCoords(d);
-  const H = sidereal(d)-c.ra, phi=LAT*rad;
-  let h = Math.asin(Math.sin(phi)*Math.sin(c.dec)+Math.cos(phi)*Math.cos(c.dec)*Math.cos(H));
-  if(body==='moon') h -= rad*0.017/Math.tan(h+rad*10.26/(h+rad*5.10)); // refraction-ish
-  return h;
-}
-function hourAngle(ms, body){ const d=toJ(ms)-J2000, c=body==='sun'?sunCoords(d):moonCoords(d);
-  let H=(sidereal(d)-c.ra)%(2*Math.PI); if(H>Math.PI)H-=2*Math.PI; if(H<-Math.PI)H+=2*Math.PI; return H; }
+    const q = new URLSearchParams({ lat: rl, long: rg, numberOfDays: String(days), datum: 'LAT' });
+    if (start) q.set('startDate', start);
 
-// Scan a day at 5-min steps for events; refine by bisection.
-function scanEvents(start, body){
-  const step=5*60e3, thresh = body==='sun' ? -0.833*rad : (0.125*rad); // moon: parallax-corrected upper limb ~+0.125
-  const out={rise:[],set:[],transit:[],antitransit:[]};
-  let prevA=altOf(start,body)-thresh, prevH=hourAngle(start,body);
-  for(let t=start+step;t<=start+dayMs;t+=step){
-    const a=altOf(t,body)-thresh, H=hourAngle(t,body);
-    if(prevA<0&&a>=0) out.rise.push(bisect(t-step,t,x=>altOf(x,body)-thresh));
-    if(prevA>=0&&a<0) out.set.push(bisect(t-step,t,x=>altOf(x,body)-thresh));
-    if(prevH<0&&H>=0&&H-prevH<Math.PI) out.transit.push(bisect(t-step,t,x=>hourAngle(x,body)));
-    if(prevH>0&&H<0&&prevH-H>Math.PI) out.antitransit.push(bisect(t-step,t,x=>{const v=hourAngle(x,body);return v<0?v+2*Math.PI-Math.PI:v-Math.PI;}));
-    prevA=a;prevH=H;
-  }
-  return out;
-}
-function bisect(a,b,f){ let fa=f(a); for(let i=0;i<30;i++){const m=(a+b)/2,fm=f(m); if((fa<0)===(fm<0)){a=m;fa=fm;}else b=m;} return (a+b)/2; }
-
-function moonPhase(ms){ // 0=new, .5=full ; returns {phase, illum, age(days)}
-  const d=toJ(ms)-J2000, s=sunCoords(d), m=moonCoords(d);
-  let ang=((m.lon-s.lon)/(2*Math.PI))%1; if(ang<0)ang+=1;
-  return {phase:ang, illum:(1-Math.cos(ang*2*Math.PI))/2, age:ang*29.530589};
-}
-
-/* ---------- Maramataka (30 nights, widely published version) ---------- */
-const MARA=[
- ['Whiro','poor','The new moon night. Dark, unsettled, and traditionally the worst night to go out. Rest the gear.'],
- ['Tirea','ok','A slim crescent. Fishing improves a little; fish close in and keep it short.'],
- ['Hoata','good','A good early-month night. Kaimoana comes on the bite, especially on the evening tide.'],
- ['Ōuenuku','good','Fine for fishing and planting. Worth a session on either tide change.'],
- ['Okoro','good','Still good. The morning bite window is often the pick.'],
- ['Tamatea-a-ngana','ok','The first Tamatea night — changeable weather and a fussy bite. Watch the wind.'],
- ['Tamatea-a-hotu','ok','Second Tamatea. Reasonable, but expect the sea to be restless.'],
- ['Tamatea-a-io','ok','Third Tamatea. Fish can come on suddenly and switch off just as fast.'],
- ['Tamatea-kai-ariki','ok','Last of the Tamatea nights. A steadier night; fish the bite windows and don\'t overstay.'],
- ['Huna','poor','Fish go to ground. A quiet night — better spent rigging up.'],
- ['Ari','ok','Some improvement. Not a standout, but the moon is high and bright by evening.'],
- ['Hotu','good','A sharp turn for the better. Kina and shellfish gathering are also good.'],
- ['Māwharu','good','Traditionally one of the best nights of the month for fishing and gathering.'],
- ['Ōhua','good','Very good. The lead-in to the full moon and fish are feeding hard.'],
- ['Atua','ok','A sacred night in many traditions; fishing is mixed. Fish the tide, not the night.'],
- ['Ōturu','good','Full-moon eve. Bright nights, big tides, and fish on the move.'],
- ['Rākaunui','good','Full moon. Excellent for fishing and for gathering; spring tides bring bait onto the flats.'],
- ['Rākaumatohi','good','Day after full. Still excellent — many hold this as the best fishing night.'],
- ['Takirau','good','Good night. The bite is short and sharp around the tide change.'],
- ['Oike','ok','A fair night that tails off. Fish early.'],
- ['Korekore-te-whiwhia','poor','First Korekore night. Fish are scarce; a night for the dinghy to stay on the beach.'],
- ['Korekore-te-rawea','poor','Second Korekore. Little doing.'],
- ['Korekore-piri-ki-Tangaroa','ok','The Korekore that leans toward Tangaroa — the bite starts to return late in the day.'],
- ['Tangaroa-a-mua','good','First Tangaroa night. The Tangaroa nights are the classic fishing run of the month.'],
- ['Tangaroa-a-roto','good','Second Tangaroa. Excellent — fish and shellfish both.'],
- ['Tangaroa-kiokio','good','Third Tangaroa. Still excellent; eels and crayfish also on the move.'],
- ['Ōtāne','good','A good night that follows the Tangaroa run. Fish are still feeding.'],
- ['Ōrongonui','good','Good for fishing and planting. The last strong night before the dark of the moon.'],
- ['Mauri','ok','Fading. Fish the morning; by evening the tide is doing more than the moon.'],
- ['Mutuwhenua','poor','The dark of the moon. Traditionally no fishing — the sea rests before Whiro.'],
-];
-function maraFor(ms){
-  const {age} = moonPhase(dayStart(ms)+12*3600e3);          // moon age at local noon
-  const idx = Math.min(29, Math.floor(age/29.530589*30));
-  return {i:idx, name:MARA[idx][0], rating:MARA[idx][1], note:MARA[idx][2]};
-}
-
-/* ---------- Tides ---------- */
-function tideEvents(start,end){ return tides.filter(t=>t.ms>=start&&t.ms<end); }
-function tideHeightAt(ms){ // cosine interpolation between neighbouring events
-  let a=null,b=null; for(const t of tides){ if(t.ms<=ms)a=t; else {b=t;break;} }
-  if(!a||!b) return null; const f=(ms-a.ms)/(b.ms-a.ms); return a.h+(b.h-a.h)*(1-Math.cos(Math.PI*f))/2;
-}
-async function loadTides(centerMs){
-  // Fetch a 12-day window around the viewed day for the current spot.
-  const start=addDays(centerMs,-2), key=`${spot.id||'geo'}:${LAT.toFixed(3)},${LON.toFixed(3)}:${ymd(start)}`;
-  if(tideCache[key]){ tides=tideCache[key]; tideStatus='ok'; return; }
-  try{ const c=JSON.parse(localStorage.getItem('aotea-tides:'+key)||'null'); if(c&&Date.now()-c.at<12*3600e3){ tides=tideCache[key]=c.ev; tideStatus='ok'; return; } }catch(_){}
-  tideStatus='loading'; renderTides(cur,cur+dayMs);
-  try{
-    const r=await fetch(`${TIDE_API}?lat=${LAT.toFixed(4)}&long=${LON.toFixed(4)}&start=${ymd(start)}&days=12`);
-    if(!r.ok) throw new Error(r.status);
-    const j=await r.json();
-    const ev=(j.values||[]).map(v=>({ms:Date.parse(v.time),h:+v.value})).filter(v=>!isNaN(v.ms)).sort((x,y)=>x.ms-y.ms);
-    for(let i=0;i<ev.length;i++){ const p=ev[i-1]||ev[i+1], n=ev[i+1]||ev[i-1]; ev[i].k=(ev[i].h>=p.h&&ev[i].h>=n.h)?'H':'L'; }
-    if(!ev.length) throw new Error('empty');
-    tides=tideCache[key]=ev; tideStatus='ok';
-    try{ localStorage.setItem('aotea-tides:'+key,JSON.stringify({at:Date.now(),ev})); }catch(_){}
-  }catch(e){ tides=[]; tideStatus='error'; }
-}
-
-/* ---------- Solunar ---------- */
-function solunar(start){
-  const mo=scanEvents(start,'moon'), su=scanEvents(start,'sun');
-  const majors=[...mo.transit.map(t=>({t,kind:'major',label:'Moon overhead'})),...mo.antitransit.map(t=>({t,kind:'major',label:'Moon underfoot'}))];
-  const minors=[...mo.rise.map(t=>({t,kind:'minor',label:'Moonrise'})),...mo.set.map(t=>({t,kind:'minor',label:'Moonset'}))];
-  const raw=[...majors,...minors].map(w=>{const half=(w.kind==='major'?60:30)*60e3;return {...w,a:w.t-half,b:w.t+half};}).sort((x,y)=>x.a-y.a);
-  // Slack water: 30 min either side of every high and low tide is dead. Trim/split
-  // any bite window that runs through it, keeping pieces of 30 min or more.
-  const SLACK=30*60e3, MINPIECE=30*60e3;
-  const slacks=tideEvents(start,start+dayMs).map(t=>({a:t.ms-SLACK,b:t.ms+SLACK,k:t.k}));
-  const wins=[];
-  for(const w of raw){
-    let pieces=[{a:w.a,b:w.b}];
-    for(const s of slacks){
-      const next=[];
-      for(const p of pieces){
-        if(s.b<=p.a||s.a>=p.b){ next.push(p); continue; }      // no overlap
-        if(s.a>p.a) next.push({a:p.a,b:s.a});                    // piece before slack
-        if(s.b<p.b) next.push({a:s.b,b:p.b});                    // piece after slack
-      }
-      pieces=next;
+    let upstream;
+    try {
+      upstream = await fetch(`${NIWA}?${q}`, { headers: { Accept: 'application/json', 'x-apikey': env.NIWA_API_KEY } });
+    } catch (e) {
+      return json({ error: 'Could not reach NIWA' }, 502, cors);
     }
-    pieces=pieces.filter(p=>p.b-p.a>=MINPIECE);
-    if(!pieces.length){ wins.push({...w,a:w.a,b:w.b,dead:true}); continue; } // fully in slack — keep for the list, flagged
-    pieces.forEach((p,i)=>wins.push({...w,a:p.a,b:p.b,split:pieces.length>1,part:i+1,parts:pieces.length}));
-  }
-  wins.sort((x,y)=>x.a-y.a);
-  return {wins,mo,su,slacks};
-}
-function dayScore(start){
-  const {wins,su,slacks}=solunar(start), ph=moonPhase(start+12*3600e3), mara=maraFor(start);
-  // --- Backbone: spring/neap moon strength, calibrated against Tides4Fishing ---
-  // 1.0 at new & full moon (spring tides), 0.0 at the quarters (neaps).
-  const closeness=Math.min(Math.min(ph.phase,1-ph.phase), Math.abs(ph.phase-.5));
-  const springNeap=Math.max(0, 1-closeness/0.25);
-  let s=springNeap;                 // 0..1 backbone — this alone reproduces T4F's tiers
-  // --- Dawn/dusk: very small nudge, slightly bigger when a live window lands on it ---
-  const dawnDusk=[...su.rise,...su.set].filter(t=>t>=start&&t<start+dayMs);
-  const live=wins.filter(w=>!w.dead);
-  let aligned=false;
-  for(const w of live){ for(const t of dawnDusk){ if(t>=w.a-30*60e3&&t<=w.b+30*60e3){ aligned=true; break; } } if(aligned) break; }
-  if(aligned) s+=0.06;              // a window sitting on dawn/dusk is the day's tie-breaker up
-  // --- Local adjustments layered on top (small, so they nudge tiers at the margins only) ---
-  s += mara.rating==='good'?0.05:mara.rating==='ok'?0:-0.05;   // maramataka nudge
-  if(!live.length) s-=0.10; else if(!live.some(w=>w.kind==='major')) s-=0.04; // slack gutted the windows
-  // --- Tiers: cutoffs match the T4F springNeap bands (0.68 / 0.48 / 0.19) ---
-  const r = s>=0.80?'excellent':s>=0.48?'good':s>=0.19?'fair':'poor';
-  return {s,r,wins,su,ph,mara,slacks,springNeap};
-}
+    if (!upstream.ok) return json({ error: `NIWA responded ${upstream.status}` }, 502, cors);
 
-/* ---------- Rendering ---------- */
-let cur = dayStart(Date.now());
-const $=id=>document.getElementById(id);
-const ratingWord={excellent:'Excellent day',good:'Good day',fair:'Fair day',poor:'Poor day'};
-
-function render(){
-  const start=cur, end=start+dayMs;
-  if(tideStatus!=='loading' && !tideCache[cacheKeyFor(start)] && !tideEvents(start,end).length){ loadTides(start).then(render); }
-  const sc=dayScore(start);
-  $('curDate').textContent=fmtDate.format(new Date(start+12*3600e3));
-  $('dateInput').value=ymd(start);
-  renderHero(start,sc); renderWeek(); renderTides(start,end); renderBites(sc); renderMara(sc); renderSunMoon(sc,start);
-}
-
-function renderHero(start,sc){
-  const W=640,H=170,L=8,R=8,T=26,B=28, iw=W-L-R, ih=H-T-B;
-  const x=ms=>L+iw*(ms-start)/dayMs;
-  const srise=sc.su.rise[0], sset=sc.su.set[0];
-  let g='';
-  // night/day background
-  g+=`<rect x="${L}" y="${T}" width="${iw}" height="${ih}" fill="var(--night)"/>`;
-  if(srise&&sset){
-    const civ=45*60e3;
-    g+=`<defs><linearGradient id="dawn" x1="0" x2="1"><stop offset="0" stop-color="var(--night)"/><stop offset="1" stop-color="var(--day)"/></linearGradient>
-        <linearGradient id="dusk" x1="0" x2="1"><stop offset="0" stop-color="var(--day)"/><stop offset="1" stop-color="var(--night)"/></linearGradient></defs>`;
-    g+=`<rect x="${x(srise-civ)}" y="${T}" width="${x(srise+civ)-x(srise-civ)}" height="${ih}" fill="url(#dawn)"/>`;
-    g+=`<rect x="${x(srise+civ)}" y="${T}" width="${x(sset-civ)-x(srise+civ)}" height="${ih}" fill="var(--day)"/>`;
-    g+=`<rect x="${x(sset-civ)}" y="${T}" width="${x(sset+civ)-x(sset-civ)}" height="${ih}" fill="url(#dusk)"/>`;
-  }
-  // tide curve
-  const hasTide = tides.length && tideHeightAt(start)!==null && tideHeightAt(start+dayMs)!==null;
-  if(hasTide){
-    const hs=[]; for(let t=start;t<=start+dayMs;t+=15*60e3){ hs.push(tideHeightAt(t)); }
-    const mn=Math.min(...hs)-.2, mx=Math.max(...hs)+.2, y=h=>T+ih-(h-mn)/(mx-mn)*ih;
-    let d=`M${x(start)} ${T+ih}`; hs.forEach((h,i)=>{d+=` L${x(start+i*15*60e3).toFixed(1)} ${y(h).toFixed(1)}`;}); d+=` L${x(start+dayMs)} ${T+ih} Z`;
-    g+=`<path d="${d}" fill="rgba(239,233,218,.28)"/>`;
-    let s=''; hs.forEach((h,i)=>{s+=(i?' L':'M')+x(start+i*15*60e3).toFixed(1)+' '+y(h).toFixed(1);});
-    g+=`<path d="${s}" fill="none" stroke="var(--sand)" stroke-width="1.5"/>`;
-    for(const t of tideEvents(start,start+dayMs)){
-      const label=`${t.k==='H'?'HW':'LW'} ${hm(t.ms)}`;
-      const ty=t.k==='H'?y(t.h)-11:y(t.h)+19, cw=label.length*6.2+10;
-      let cx=x(t.ms); cx=Math.max(L+cw/2, Math.min(L+iw-cw/2, cx)); // keep the pill inside the panel
-      g+=`<g style="font-family:var(--ui)"><rect x="${(cx-cw/2).toFixed(1)}" y="${ty-11}" width="${cw.toFixed(1)}" height="15" rx="7.5" fill="var(--sand)" opacity="0.92"/>`
-        +`<text x="${cx.toFixed(1)}" y="${ty}" text-anchor="middle" font-size="10.5" font-weight="600" fill="var(--sea)">${label}</text></g>`;
-    }
-  }
-  // bite windows drawn at their FULL solunar extent (centre ± half), so the slack
-  // block-out that follows visibly bites a chunk out of the window.
-  const seen=new Set();
-  for(const w of sc.wins){
-    const half=(w.kind==='major'?60:30)*60e3, fa=w.t-half, fb=w.t+half;
-    const key=w.kind+':'+w.t; if(seen.has(key)) continue; seen.add(key); // split pieces share a centre
-    const a=Math.max(fa,start), b=Math.min(fb,start+dayMs); if(b<=a) continue;
-    g+=`<rect x="${x(a)}" y="${T}" width="${x(b)-x(a)}" height="${ih}" fill="${w.kind==='major'?'var(--kina-soft)':'rgba(212,113,43,.14)'}" stroke="${w.kind==='major'?'var(--kina)':'none'}" stroke-width="1"/>`;
-  }
-  // slack water — 30 min either side of each tide turn, blocked out ON TOP of the
-  // bite windows so the dead portion of the window is clearly cut away.
-  if((sc.slacks||[]).length){
-    g+=`<defs><pattern id="slackHatch" width="6" height="6" patternTransform="rotate(45)" patternUnits="userSpaceOnUse"><rect width="6" height="6" fill="rgba(20,28,30,.55)"/><line x1="0" y1="0" x2="0" y2="6" stroke="rgba(239,233,218,.22)" stroke-width="1.5"/></pattern></defs>`;
-  }
-  for(const s of (sc.slacks||[])){
-    const a=Math.max(s.a,start), b=Math.min(s.b,start+dayMs); if(b<=a) continue;
-    g+=`<rect x="${x(a)}" y="${T}" width="${x(b)-x(a)}" height="${ih}" fill="url(#slackHatch)"/>`;
-  }
-  // sun ticks
-  for(const [t,lab] of [[srise,'☀ '+(srise?hm(srise):'')],[sset,(sset?hm(sset):'')+' ☾']]){
-    if(!t) continue; g+=`<line x1="${x(t)}" x2="${x(t)}" y1="${T-4}" y2="${T+ih}" stroke="var(--moon)" stroke-width="1" stroke-dasharray="3 3"/>
-      <text x="${x(t)}" y="${T-9}" text-anchor="middle" font-size="12" fill="var(--moon)">${lab}</text>`;
-  }
-  // hour axis
-  for(let h=0;h<=24;h+=3){ const xx=L+iw*h/24; g+=`<line x1="${xx}" x2="${xx}" y1="${T+ih}" y2="${T+ih+5}" stroke="var(--day)"/><text x="${xx}" y="${H-8}" text-anchor="${h===0?'start':h===24?'end':'middle'}" font-size="11" fill="var(--day)">${h===24?'24':String(h).padStart(2,'0')}</text>`; }
-  // now marker
-  const now=Date.now(); if(now>=start&&now<start+dayMs){ g+=`<line x1="${x(now)}" x2="${x(now)}" y1="${T}" y2="${T+ih}" stroke="#fff" stroke-width="2"/>`; }
-
-  const best = sc.wins.filter(w=>w.kind==='major'&&!w.dead).map(w=>hm(w.a)+'–'+hm(w.b)).join(' and ');
-  $('hero').innerHTML=`<div class="verdict"><b>${ratingWord[sc.r]}</b><span>${sc.mara.name} · moon ${Math.round(sc.ph.illum*100)}%</span></div>
-    <svg viewBox="0 0 ${W} ${H}" style="font-family:var(--ui)" role="img" aria-label="Timeline of the day showing daylight, tide curve and bite windows">${g}</svg>
-    <div class="legend"><span><i style="background:var(--kina-soft);outline:1px solid var(--kina)"></i>Major bite</span><span><i style="background:rgba(212,113,43,.14)"></i>Minor bite</span>${hasTide?'<span><i style="background:repeating-linear-gradient(45deg,rgba(20,28,30,.55),rgba(20,28,30,.55) 3px,rgba(239,233,218,.3) 3px,rgba(239,233,218,.3) 4px)"></i>Slack (bite off)</span>':''}<span><i style="background:var(--day)"></i>Daylight</span></div>
-    ${best?`<p style="margin:10px 4px 2px;font-size:.95rem">Major bite windows: ${best}.</p>`:''}`;
-}
-
-function renderWeek(){
-  const base=dayStart(Date.now()); let html='';
-  for(let i=0;i<7;i++){ const d=addDays(base,i), sc=dayScore(d);
-    html+=`<button data-ms="${d}" class="${d===cur?'sel':''}"><span class="d">${fmtDow.format(new Date(d+12*3600e3))}</span><span class="n">${new Date(d+12*3600e3).toLocaleDateString('en-NZ',{timeZone:TZ,day:'numeric'})}</span><span class="dot ${sc.r}" title="${ratingWord[sc.r]}"></span></button>`; }
-  $('week').innerHTML=html;
-  $('week').querySelectorAll('button').forEach(b=>b.onclick=()=>{cur=+b.dataset.ms;render();});
-}
-
-function renderTides(start,end){
-  const ev=tideEvents(start,end);
-  if(tideStatus==='loading' && !ev.length){ $('tideSrc').textContent=''; $('tides').innerHTML='<p class="loading">Fetching tides for '+spotName()+'…</p>'; return; }
-  if(!ev.length){
-    $('tideSrc').textContent='';
-    $('tides').innerHTML=`<div class="notice"><p><b>Tides unavailable right now.</b> ${tideStatus==='error'?'The tide service didn\'t answer. ':''}Bite times, sun and moon below are still correct for ${spotName()}.</p><p><label id="retry" role="button" tabindex="0">Try again</label></p></div>`;
-    $('retry').onclick=()=>{ delete tideCache[cacheKeyFor(start)]; loadTides(start).then(render); };
-    return;
-  }
-  $('tideSrc').textContent='NIWA · '+spotName();
-  $('tides').innerHTML='<div class="rows">'+ev.map(t=>`<div class="row"><span class="t">${hm(t.ms)}</span><span class="k">${t.k==='H'?'High water':'Low water'}</span><span class="v">${t.h.toFixed(1)} m</span></div>`).join('')+'</div>';
-}
-function cacheKeyFor(ms){ const start=addDays(ms,-2); return `${spot.id||'geo'}:${LAT.toFixed(3)},${LON.toFixed(3)}:${ymd(start)}`; }
-function spotName(){ return spot.id?spot.name:'your location'; }
-
-function renderBites(sc){
-  let html='';
-  for(const w of sc.wins){
-    if(w.dead){
-      html+=`<div class="row ${w.kind}"><span class="t">${hm(w.t)}</span><span class="k">${w.kind==='major'?'Major':'Minor'} · ${w.label} — falls on the tide turn</span><span class="v"><span class="pill poor">slack</span></span></div>`;
-      continue;
-    }
-    const rating=w.kind==='major'?'good':'ok';
-    const tag=w.split?` · part ${w.part} of ${w.parts}`:'';
-    html+=`<div class="row ${w.kind}"><span class="t">${hm(w.a)}–${hm(w.b)}</span><span class="k">${w.kind==='major'?'Major':'Minor'} · ${w.label} ${hm(w.t)}${tag}</span><span class="v"><span class="pill ${rating}">${w.kind}</span></span></div>`;
-  }
-  $('bites').innerHTML=html||'<div class="row"><span class="k">No moon events fall inside this day.</span></div>';
-}
-
-function renderMara(sc){
-  const m=sc.mara, ph=sc.ph, r=28;
-  // moon disc: illuminated fraction drawn as a lit ellipse over a dark disc
-  const k=Math.cos(ph.phase*2*Math.PI), waxing=ph.phase<0.5, rx=Math.abs(k)*r;
-  const lit = `<circle cx="30" cy="30" r="${r}" fill="#0B1F24"/>
-    <path d="M30 ${30-r} A${r} ${r} 0 0 ${waxing?0:1} 30 ${30+r} A${rx} ${r} 0 0 ${(k<0)===waxing?0:1} 30 ${30-r} Z" fill="var(--moon)"/>`;
-  $('mara').innerHTML=`<svg class="moon" viewBox="0 0 60 60" aria-hidden="true">${lit}</svg>
-    <div><div class="name">${m.name} <span class="pill ${m.rating}">${m.rating==='good'?'good':m.rating==='ok'?'fair':'poor'}</span></div>
-    <div class="sub">Night ${m.i+1} of 30 · moon ${ph.age.toFixed(1)} days old, ${Math.round(ph.illum*100)}% lit, ${waxing?'waxing':'waning'}</div>
-    <p>${m.note}</p></div>`;
-}
-
-function renderSunMoon(sc,start){
-  const mo=sc.wins.length?scanEvents(start,'moon'):{rise:[],set:[]};
-  const rows=[];
-  if(sc.su.rise[0]) rows.push([hm(sc.su.rise[0]),'Sunrise']);
-  if(sc.su.set[0]) rows.push([hm(sc.su.set[0]),'Sunset']);
-  for(const t of mo.rise) rows.push([hm(t),'Moonrise']);
-  for(const t of mo.set) rows.push([hm(t),'Moonset']);
-  rows.sort((a,b)=>a[0].localeCompare(b[0]));
-  $('sunmoon').innerHTML=rows.map(r=>`<div class="row"><span class="t">${r[0]}</span><span class="k">${r[1]}</span><span></span></div>`).join('');
-}
-
-/* ---------- Wiring ---------- */
-function setSpot(s,push=true){
-  spot=s; LAT=s.lat; LON=s.lon; tides=[]; tideStatus='idle';
-  $('spotSel').value=s.id||''; $('coast').textContent=s.coast||'';
-  if(push&&s.id){ const u=new URL(location.href); u.searchParams.set('spot',s.id); history.replaceState(null,'',u); }
-  render();
-}
-$('spotSel').innerHTML=SPOTS.map(s=>`<option value="${s.id}">${s.name}</option>`).join('')+'<option value="" disabled hidden>My location</option>';
-$('spotSel').onchange=e=>setSpot(SPOTS.find(s=>s.id===e.target.value));
-$('geo').onclick=()=>{
-  if(!navigator.geolocation){ alert('Location isn\'t available in this browser.'); return; }
-  navigator.geolocation.getCurrentPosition(p=>{
-    const {latitude:la,longitude:lo}=p.coords;
-    if(la<ISLAND.latMin||la>ISLAND.latMax||lo<ISLAND.lonMin||lo>ISLAND.lonMax){ alert('You don\'t look to be on Aotea — pick a spot from the list instead.'); return; }
-    // snap to the nearest listed spot if within ~3 km, otherwise use the raw position
-    let best=null,bd=1e9; for(const s of SPOTS){ const d=Math.hypot((s.lat-la)*111,(s.lon-lo)*90); if(d<bd){bd=d;best=s;} }
-    if(bd<3) setSpot(best); else setSpot({id:'',name:'My location',coast:`Near ${best.name}`,lat:la,lon:lo},false);
-  },()=>alert('Couldn\'t get your location. Pick a spot from the list.'),{timeout:8000,maximumAge:600e3});
+    const body = await upstream.text();
+    const res = new Response(body, {
+      status: 200,
+      headers: { 'Content-Type': 'application/json', 'Cache-Control': `public, max-age=${CACHE_SECONDS}` },
+    });
+    ctx.waitUntil(cache.put(cacheKey, res.clone()));
+    return withHeaders(res, cors, 'MISS');
+  },
 };
-$('prev').onclick=()=>{cur=addDays(cur,-1);render();};
-$('next').onclick=()=>{cur=addDays(cur,1);render();};
-$('todayBtn').onclick=()=>{cur=dayStart(Date.now());render();};
-$('pick').onclick=()=>{ const i=$('dateInput'); i.showPicker?i.showPicker():i.click(); };
-$('dateInput').onchange=e=>{ const [y,m,d]=e.target.value.split('-').map(Number); if(y){cur=nzMidnight(y,m,d);render();} };
-const initial=SPOTS.find(s=>s.id===new URLSearchParams(location.search).get('spot'))||SPOTS[0];
-setSpot(initial,false);
-setInterval(()=>{ if(cur===dayStart(Date.now())) render(); }, 60e3);
-</script>
-</body>
-</html>
+
+function json(obj, status, cors) {
+  return new Response(JSON.stringify(obj), { status, headers: { 'Content-Type': 'application/json', ...cors } });
+}
+function withHeaders(res, cors, cacheState) {
+  const r = new Response(res.body, res);
+  for (const [k, v] of Object.entries(cors)) r.headers.set(k, v);
+  r.headers.set('X-Cache', cacheState);
+  return r;
+}
